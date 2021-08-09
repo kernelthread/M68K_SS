@@ -2250,52 +2250,17 @@ accstr:
 	move.b 5(a1), d0
 	rts
 
-func2:
-	cmp.b #0xd9, d0
-	bne syntax
-	bsr operand
-	tst.b d6
-	bpl typemis
-	lea strbf, a1
-	cmp.l a1, a0
-	beq.s crfn1
-crfn2:
-	move.b (a0)+, (a1)+
-	dbra d0, crfn2
-crfn1:
-	move.l a6, -(a7)
-	lea strbf, a6
-	bsr crunch
-	move.l (a7)+, a6
-	lea strbf, a0
-	move.l a0, a1
-	moveq #13, d0
-	moveq #-1, d1
-crfn3:
-	cmp.b (a1), d1
-	beq.s crfn4
-	cmp.b (a1)+, d0
-	bne.s crfn3
-	move.l a1, d0
-	sub.l a0, d0
-	subq.l #1, d0
-	rts
-crfn4:
-	move.l a1, d2
-	addq.l #8, d2
-	and.w #0xfffe, d2
-	move.l d2, a1
-	bra.s crfn3
-
 /* Deal with a function call */
 function:
 	sub.b #0xc4, d0
-	bcs.s func2
+	bcs.s function0
 	ext.w d0
 	add.w d0, d0
 	lea fnjt-.-2(pc), a0
 	add.w 0(a0, d0.w), a0
 	jmp (a0)
+function0:
+    bra syntax
 fnjt:
 	dc.w syntax-fnjt, pagefn-fnjt, topfn-fnjt, lomemfn-fnjt, himemfn-fnjt
 	dc.w time-fnjt, chrs-fnjt, gets-fnjt, inkeys-fnjt, lefts-fnjt
@@ -2396,7 +2361,9 @@ inkeys1:
 	moveq #-1, d6
 	rts
 
-/* Push a string value onto the BASIC stack */
+/* If a string is in the general string buffer, copy it to the BASIC stack.
+   If it is elsewhere, leave it where it is.
+ */
 pstbf:
 	lea strbf, a4
 	cmp.l a4, a0
@@ -3035,12 +3002,49 @@ eval:
 	bsr operand
 	tst.b d6
 	bpl typemis
-	movem.l a5/a6, -(a7)
-	bsr pstbf
-	move.l a0, a6
-	bsr expr
-	movem.l (a7)+, a5/a6
+	movem.l a5/a6, -(a7)    /* Save program pointer and BASIC stack pointer */
+    bsr crunchstr           /* Move string to strbf and tokenize */
+	bsr pstbf               /* Move tokenized string to BASIC stack */
+	move.l a0, a6           /* Program pointer points to tokenized string */
+	bsr expr                /* Evaluate it as an expression */
+	movem.l (a7)+, a5/a6    /* Restore program pointer and BASIC stack pointer */
 	rts
+
+/* Tokenize a string
+   Enter with A0 pointing to string
+              D0.W = length of string
+   Return with A0 pointing to strbf, which contains the tokenized string
+               D0.L = length of tokenized string
+ */
+crunchstr:
+	lea strbf, a1
+	cmp.l a1, a0
+	beq.s crunchstr1
+crunchstr2:
+	move.b (a0)+, (a1)+     /* If not already in string buffer, copy it there */
+	dbra d0, crunchstr2
+crunchstr1:
+	lea strbf, a6           /* pointer to line to be tokenized */
+	bsr crunch              /* tokenize it */
+	lea strbf, a0           /* A0 points to string buffer */
+	move.l a0, a1
+	moveq #13, d0
+	moveq #-1, d1
+crunchstr3:
+	cmp.b (a1), d1          /* Check for FF (cache space reservation token) */
+	beq.s crunchstr4        /* branch out if it is */
+	cmp.b (a1)+, d0         /* Check for CR (end of string) */
+	bne.s crunchstr3        /* If not, check next char */
+	move.l a1, d0           /* pointer to byte after CR */
+	sub.l a0, d0            /* D0.L = length including CR */
+	subq.l #1, d0           /* subtract 1 for CR */
+	rts
+crunchstr4:
+	move.l a1, d2           /* FF token */
+	addq.l #8, d2           /* Add space for 6 bytes after FF, aligned to even address */
+	and.w #0xfffe, d2
+	move.l d2, a1
+	bra.s crunchstr3        /* check next char */
 
 /* NOT function */
 not:
