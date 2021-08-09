@@ -1,0 +1,14 @@
+# Ignore generated files
+
+**/*.elf
+**/*.o
+Assembler/68kAsm.bin
+Assembler/68kAsm.lst
+Basic/68kBasic.bin
+Basic/68kBasic.lst
+BootROM/boot68k.bin
+BootROM/boot68k.lst
+OS/68kOS.bin
+OS/68kOS.lst
+Word/68kWp.bin
+Word/68kWp.lst
