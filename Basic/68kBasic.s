@@ -60,6 +60,9 @@
 /* Memory flag set by OS if ESCAPE key pressed */
 .equ	esc, 0x35
 
+/* Small host side buffer for some operations */
+.equ    HOST_SIDE_BUF, 0x5F0
+
 /* Abbreviations for very commonly used labels */
 .equ	il, illegal
 .equ	sy, syntax
@@ -69,6 +72,10 @@
 /* Everything in one section, START is the entry point */
     .section .text
     .global START
+
+START:
+    bra start_basic
+
 
 /* Floating point format:
  * Each FP value is stored as 6 bytes.
@@ -2807,7 +2814,7 @@ point:
 	rol.w #8, d0
 	move.w d0, 2(a7)
 	move.l a7, a1
-	lea 0x5f0, a0
+	lea HOST_SIDE_BUF, a0
 	move.l #0x50003, d0
 	trap #gen
 	move.l #0x5f00901, d0
@@ -4246,7 +4253,7 @@ kwdt:
  * MAIN ENTRY POINT
  ******************************************************************************/
 .align 2
-START:
+start_basic:
 	move.l #0x6000, page            /* Set up PAGE, user stack pointer, HIMEM, format variable */
 	lea error-.-2(pc), a0           /* Address to restart at after error */
 	moveq #0x13, d0
@@ -5120,10 +5127,10 @@ crunch:
 	movem.l a0/a1/a2/a4/a6/d0/d1/d2, -(a7)
 	lea 256(a6), a4
 crunch0:
-	cmp.b #42, (a6)
-	beq.s crunch7
+	cmp.b #0x2a, (a6)               /* asterisk? */
+	beq.s crunch_end                /* if so, rest of line is OSCLI command, so finish */
 crunch2:
-	bsr nospc
+	bsr nospc                       /* skip spaces */
 	cmp.b #0x41, d0
 	bcs.s crunch2a
 	cmp.b #0x5a, d0
@@ -5132,7 +5139,7 @@ crunch2a:
 	cmp.b #0x22, d0
 	beq crunch5
 	cmp.b #13, d0
-	beq.s crunch7
+	beq.s crunch_end
 	cmp.b #0x3c, d0
 	bcs.s crunch6
 	cmp.b #0x3e, d0
@@ -5158,7 +5165,7 @@ crunch3:
 	bra.s crunch2
 crunch4:
 	beq.s crunch0
-crunch7:
+crunch_end:
 	movem.l (a7)+, a0/a1/a2/a4/a6/d0/d1/d2
 	rts
 crunch6:
@@ -5175,7 +5182,7 @@ crunch1a:
 	cmp.b (a1)+, d1
 	bne.s crunch1a
 	cmp.b #0x8b, d0
-	beq.s crunch7
+	beq.s crunch_end
 	cmp.b #0x94, d0
 	beq.s crunch8
 	cmp.b #0x95, d0
@@ -5380,17 +5387,46 @@ chain:
 	trap #file
 	move.l page, a0
 	bsr chkprg
-	bra.s run
+	bra run
 
-/* Execute a command or statement token */
-token:
-	cmp.b #0xbb, d0
-	bhi lettkn
-	add.b d0, d0
-	ext.w d0
-	lea stjt-.-2(pc), a0
-	add.w 0(a0, d0.w), a0
-	jmp (a0)
+/* Jump table for commands and statements */
+.equ	s, stjt
+.equ	m, mstk-s
+stjt:
+    dc.w    sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s    /* 00-07 */
+    dc.w    sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   runln2-s, sy-s, sy-s    /* 08-0F */
+    dc.w    sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s    /* 10-17 */
+    dc.w    sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s    /* 18-1F */
+    dc.w    l2-s,   qoke_h-s,   sy-s,   sy-s,   strind_h-s,   sy-s, sy-s,   sy-s    /* 20-27 */
+    dc.w    sy-s,   sy-s,   starcmd-s,   sy-s,   sy-s,   sy-s,   sy-s,  sy-s        /* 28-2F */
+    dc.w    sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s            /* 30-37 */
+    dc.w    sy-s,   sy-s,   l-s,    sy-s,   sy-s,   fnend-s,   sy-s,    poke_h-s    /* 38-3F */
+    dc.w    letfmt_h-s,   letuc-s, letuc-s, letuc-s, letuc-s, letuc-s, letuc-s, letuc-s /* 40-47 */
+    dc.w    letuc-s, letuc-s, letuc-s, letuc-s, letuc-s, letuc-s, letuc-s, letuc-s  /* 48-4F */
+    dc.w    letuc-s, letuc-s, letuc-s, letuc-s, letuc-s, letuc-s, letuc-s, letuc-s  /* 50-57 */
+    dc.w    letuc-s, letuc-s, letuc-s, sy-s,    sy-s,    sy-s,    sy-s,    sy-s     /* 58-5F */
+    dc.w    sy-s,    letlc-s, letlc-s, letlc-s, letlc-s, letlc-s, letlc-s, letlc-s  /* 60-67 */
+    dc.w    letlc-s, letlc-s, letlc-s, letlc-s, letlc-s, letlc-s, letlc-s, letlc-s  /* 68-6F */
+    dc.w    letlc-s, letlc-s, letlc-s, letlc-s, letlc-s, letlc-s, letlc-s, letlc-s  /* 70-77 */
+    dc.w    letlc-s, letlc-s, letlc-s, sy-s,    sy-s,    sy-s,    sy-s,    sy-s     /* 78-7F */
+
+	dc.w    auto-s, bput-s, colour-s, clr-s, close-s, cls-s, clg-s, call-s          /* 80-87 */
+    dc.w    chain-s, dltcmd-s, draw-s, linend-s, def-s, dim-s, env-s, endproc-s     /* 88-8F */
+    dc.w    end-s, linend-s, sy-s, for-s, goto-s, gosub-s, gcol-s, input-s          /* 90-97 */
+    dc.w    if-s, list-s, load-s, local-s, let-s, sy-s, mode-s, move-s              /* 98-9F */
+    dc.w    next-s, new-s, old-s, on-s, sy-s, oscli1-s, print-s, proc-s             /* A0-A7 */
+    dc.w    plot-s, repeat-s, return-s, restore-s, m, linend-s, read-s, run-s       /* A8-AF */
+    dc.w    renum-s, sy-s, save-s, stop-s, sound-s, sy-s, m, sy-s                   /* B0-B7 */
+    dc.w    sy-s, until-s, vdu-s, m,    sy-s,   sy-s,   sy-s,   sy-s                /* B8-BF */
+    dc.w    sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   letpage-s,     sy-s, letlomem-s /* C0-C7 */
+    dc.w    lethimem-s, lettime-s,  sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s    /* C8-CF */
+    dc.w    sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s    /* D0-D7 */
+    dc.w    sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s    /* D8-DF */
+    dc.w    sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s    /* E0-E7 */
+    dc.w    sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s    /* E8-EF */
+    dc.w    sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s    /* F0-F7 */
+    dc.w    sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s,   sy-s    /* F8-FF */
+
 escp:
 	bra escape
 
@@ -5469,21 +5505,23 @@ l:
 	tst.b esc
 	bmi.s escp              /* Break out if ESCAPE pressed */
 l2:
+    moveq #0, d0
 	move.b (a6)+, d0
-	bmi.s token
-	cmp.b #32, d0
-	beq.s l2
-	cmp.b #58, d0
-	beq.s l
-	cmp.b #13, d0
-	beq.s runln2
-	cmp.b #61, d0
-	beq.s fnend
-	cmp.b #42, d0
-	bne let0
+l3:
+    add.w d0, d0
+	lea stjt-.-2(pc), a0    /* take jump table entry based on character */
+	add.w 0(a0, d0.w), a0
+	jmp (a0)
+
+/* Statement begins with * -> pass to OSCLI */
+starcmd:
 	move.l a6, a0
 	moveq #4, d0
 	trap #gen
+
+/* Step to the end of the current line, then continue execution at the
+ * next line, if there is one.
+ */
 linend:
 	moveq #13, d0
 linend2:
@@ -5491,25 +5529,29 @@ linend2:
 	bne.s linend2
 runln2:
 	move.l a6, d0
-	cmp.l page, a6
+	cmp.l page, a6          /* current text ptr < PAGE => console command line, so stop */
 	bcs.s end
 	addq.l #1, d0
 	and.w #0xfffe, d0
-	move.l d0, a6
-	bra.s runln
+	move.l d0, a6           /* round up to even address */
+	bra.s runln             /* run next line */
 end:
 	bra main
+
+/* skip past any spaces at the end of a statement, then carry on with the next statement */
 l1:
 	move.b (a6)+, d0
 	cmp.b #32, d0
 	beq.s l1
-	cmp.b #58, d0
-	beq.s l
-	cmp.b #13, d0
-	beq.s runln2
-	cmp.b #0x91, d0
-	beq.s linend
-	bra sy
+	cmp.b #58, d0           /* colon? */
+	beq.s l                 /* yes - another statement on this line */
+	cmp.b #13, d0           /* end of line? */
+	beq.s runln2            /* yes - execute next line, if any */
+	cmp.b #0x91, d0         /* ELSE token? */
+	beq.s linend            /* if yes, we have just executed the THEN part of an IF
+                             * so skip to the end of the line before continuing execution
+                             */
+	bra sy                  /* otherwise, error */
 nofn:
 	trap #err
 	dc.b 7
@@ -5525,6 +5567,7 @@ fnend:
 	bsr pop
 	movem.l (a7)+, a0/a1/d0/d1/d6
 	rts
+
 
 /* */
 vduw:
@@ -6115,21 +6158,29 @@ create5:
 	moveq #0, d0
 	rts
 
+/* Assignment to $OPERAND */
+strind_h:
 strind:
-	bsr intarg
+	bsr intarg              /* evaluate integer expression - gives address to write string */
 sti2:
 	move.b (a6)+, d5
-	cmp.b #32, d5
+	cmp.b #32, d5           /* skip past spaces */
 	beq.s sti2
-	cmp.b #61, d5
+	cmp.b #61, d5           /* next char must be = */
 	bne mstk
-	move.l d0, -(a7)
-	bsr strexpr
-	move.l (a7)+, a1
+	move.l d0, -(a7)        /* save address */
+	bsr strexpr             /* get string expression to be written to the location
+                               return with D0.W = length, A0 = address
+                             */
+	move.l (a7)+, a1        /* restore dest addr */
 sti3:
-	move.b (a0)+, (a1)+
+	move.b (a0)+, (a1)+     /* copy string + terminator */
 	dbra d0, sti3
-	bra l1
+	bra l1                  /* next statement */
+
+/* Check an operand or expression has numeric type, then convert it to
+ * an integer if necessary
+ */
 intv:
 	tst.b d6
 	bmi typemis
@@ -6140,6 +6191,7 @@ intv1:
 	move.w (a0)+, d1
 	move.l (a0), d0
 	bra fpint
+
 letind:
 	cmp.b #0x24, d0
 	beq.s strind
@@ -6150,8 +6202,13 @@ letind:
 	beq.s poke1
 	bra sy
 
+/* Assignment to ?OPERAND */
+poke_h:
+    moveq #0, d0
+    bra.s poke2
 poke:
 	bsr.s intv
+poke2:
 	move.l d0, -(a7)
 poke1:
 	bsr intarg
@@ -6167,8 +6224,21 @@ poke0:
 	move.b d0, (a0)
 	bra l1
 
+/* Assignment to VAR?OPERAND or VAR!OPERAND */
+ltind:
+	cmp.b #33, d5       /* check for ! */
+	beq.s qoke0         /* yes - do 32 bit indirect assignment */
+	cmp.b #63, d5       /* check for ? */
+	beq.s poke          /* yes - do 8 bit indirect assignment */
+	bra mstk            /* otherwise, error */
+
+/* Assignment to !OPERAND */
+qoke_h:
+    moveq #0, d0
+    bra.s qoke2
 qoke0:
 	bsr.s intv
+qoke2:
 	move.l d0, -(a7)
 qoke:
 	bsr intarg
@@ -6186,72 +6256,129 @@ qoke1:
 	move.l d0, (a0)
 	bra l1
 
-ltind2:
-	cmp.b #33, d5
-	beq.s qoke0
-	cmp.b #63, d5
-	beq.s poke
-	bra mstk
+/* Statement starts with LET token */
+let:
+    moveq #0, d0
+let1:
+    move.b (a6)+, d0
+    cmp.b #32, d0                   /* skip spaces */
+    beq.s let1
+    lea lettab-.-2(pc), a0
+    move.w d0, d1
+    lsr.w #3, d1
+    btst.b d0, 0(a0, d1.w)          /* check for valid token after LET */
+    bne l3                          /* if valid, just ignore the LET and proceed */
+    bra sy                          /* otherwise, error */
+lettab:
+    dc.b 0x00, 0x00, 0x00, 0x00     /* characters 00-1F not permitted after LET */
+    dc.b 0x13, 0x00, 0x00, 0x80     /* <space>, !, $, ? permitted in range 20-3F */
+    dc.b 0xFF, 0xFF, 0xFF, 0x07     /* @, A-Z permitted in range 40-5F */
+    dc.b 0xFE, 0xFF, 0xFF, 0x07     /* a-z permitted in range 60-7F */
+    dc.b 0x00, 0x00, 0x00, 0x00     /* tokens 80-9F not permitted */
+    dc.b 0x00, 0x00, 0x00, 0x00     /* tokens A0-BF not permitted */
+    dc.b 0xA0, 0x03, 0x00, 0x00     /* PAGE, LOMEM, HIMEM, TIME permitted in range C0-DF */
+    dc.b 0x00, 0x00, 0x00, 0x00     /* tokens E0-FF not permitted */
 
-lettkn:
-	sub.b #0xc5, d0
-	bcs sy
-	cmp.b #4, d0
-	bhi sy
-	subq.b #1, d0
-	beq sy
-	bmi.s letpg
-	subq.b #1, d0
-	beq.s letlm
-	subq.b #1, d0
-	bne lettm
-	lea himem, a0
-	bra.s letint
-letlm:
-	lea lomem, a0
-	bra.s letint
-letpg:
+/* statement starts with @ - must be assignment to format variable
+   or indirect assignment with @% as base.
+ */
+letfmt_h:
+    bsr accfmv          /* check for % and get address of @% */
+    bra.s let2          /* do the assignment or indirection */
+
+/* statement starts with PAGE - must be assignment to PAGE or
+   or indirect assignment with PAGE as base.
+ */
+letpage:
 	lea page, a0
+    bra.s letint
+
+/* statement starts with HIMEM - must be assignment to HIMEM or
+   or indirect assignment with HIMEM as base.
+ */
+lethimem:
+	lea himem, a0
+    bra.s letint
+
+/* statement starts with LOMEM - must be assignment to LOMEM or
+   or indirect assignment with LOMEM as base.
+ */
+letlomem:
+	lea lomem, a0
+
+/* Assignment to integer variable pointed to by A0 */
 letint:
 	moveq #0, d6
-	bra.s let2
-let0:
-	subq.l #1, a6
-let:
-	move.b (a6)+, d0
-	bmi.s lettkn
-	cmp.b #64, d0
-	bcs letind
-	bsr access0
+
+/* Assignment to variable pointed to by A0, type in D0.B */
 let2:
 	move.b (a6)+, d5
 	cmp.b #32, d5
-	beq.s let2
+	beq.s let2              /* skip spaces */
+let3:
 	cmp.b #61, d5
-	bne ltind2
+	bne ltind               /* if next non-space char is not =, must be indirection ? or ! */
 	tst.b d6
-	bmi.s letstr
-	bne.s letfp
-	move.l a0, -(a7)
-	bsr ix
-	move.l (a7)+, a0
+	bmi letstr              /* branch if string assignment */
+	bne.s letfp             /* branch if float */
+	move.l a0, -(a7)        /* save variable address */
+	bsr ix                  /* evaluate RHS as integer expression */
+	move.l (a7)+, a0        /* restore variable address */
+
+/* Not sure why this is here
+ * It disallows writes to addresses below 0x100 unless the type is integer */
+ */
 	cmp.w #256, a0
 	bcc.s letintok
 	btst #0, d0
 	bne aerr
 letintok:
-	move.l d0, (a0)
-	cmp.w #lomem, a0
-	bne l1
-	bsr clear
+	cmp.w #lomem, a0        /* is assignment to LOMEM? */
+    beq.s letlomem2         /* branch out if yes */
+	move.l d0, (a0)         /* no, assign the integer */
+	bra l1                  /* next statement */
+letlomem2:
+    cmp.l (a0), d0          /* is LOMEM being modified? */
+    beq l1                  /* no - next statement */
+    move.l d0, (a0)         /* yes - write new value */
+	bsr clear               /* and clear all variables */
 	bra l1
 letfp:
 	move.l a0, -(a7)
-	bsr.s fpexpr
+	bsr.s fpexpr            /* evaluate RHS as float expression */
 	move.l (a7)+, a0
-	move.w d1, (a0)+
+	move.w d1, (a0)+        /* assign float to variable */
 	move.l d0, (a0)
 	bra l1
+
+/* statement starts with uppercase but not keyword - must be assignment */
+letuc:
+	cmp.b #0x25, (a6)       /* check if following char is % - if so, may be resident integer */
+    bne.s letuc1
+	cmp.b #0x28, 1(a6)      /* % found, check if char after % is ( - if so, array, else resident integer */
+    bne.s letuc1
+    add.w d0, d0            /* d0.w = 4*ASCII value */
+    lea resint - 4*65, a0   /* base address of resident integers, offset because d0 = 4*ASCII value */
+    add.w d0, a0            /* A0 = address of variable value */
+	moveq #0, d6            /* type = integer */
+
+/* variable beginning with uppercase, not resident integer
+ * D0.W = 2 * ASCII value
+ */
+letuc1:
+    lsr.w #1, d0
+    sub.w #65, d0           /* character value - 'A' */
+    lea varca, a0           /* upper case list heads */
+    bsr access1             /* find or create variable */
+    bra.s let2              /* assign variable */
+
+/* statement starts with lowercase - must be assignment */
+letlc:
+    lsr.w #1, d0
+    sub.w #97, d0           /* character value - 'a' */
+    lea varsa, a0           /* lower case list heads */
+    bsr access1             /* find or create variable */
+    bra let2                /* assign variable */
 
 /* Evaluate an expression and return a floating point result */
 fpexpr:
@@ -6261,12 +6388,17 @@ fpexpr:
 	beq intfp
 	rts
 
+/* Assign to a string variable */
 letstr:
-	movem.l a0/a1, -(a7)
+	movem.l a0/a1, -(a7)    /* FIXME: What's in A1? */
 	bsr strexpr
 	movem.l (a7)+, a2/a3
 	bsr.s letstrsub
 	bra l1
+
+/* Assign to a string variable
+ * String to be assigned has length D0.W, pointer A0
+ */
 letstrsub:
 	cmp.b 4(a3), d0
 	bls.s letstr1
@@ -6292,37 +6424,28 @@ letstr2:
 	move.w (a0)+, (a2)+
 	dbra d0, letstr2
 	rts
-lettm:
-	move.b (a6)+, d5
-	cmp.b #32, d5
-	beq.s lettm
-	cmp.b #61, d5
-	bne mstk
-	bsr ix
-	rol.w #8, d0
-	swap d0
-	rol.w #8, d0
-	clr.w -(a7)
-	move.l d0, -(a7)
-	move.l a7, a1
-	move.l #0x50003, d0
-	lea 0x5f0, a0
-	trap #gen
-	move.l #0x5f00201, d0
-	trap #gen
-	addq.l #6, a7
-	bra l1
 
-/* Jump table for commands and statements */
-.equ	s, stjt
-.equ	m, mstk-s
-stjt:
-	dc.w auto-s, bput-s, colour-s, clr-s, close-s, cls-s, clg-s, call-s, chain-s, dltcmd-s
-	dc.w draw-s, linend-s, def-s, dim-s, env-s, endproc-s, end-s, linend-s, sy-s, for-s
-    dc.w goto-s, gosub-s, gcol-s, input-s, if-s, list-s, load-s, local-s, let-s, sy-s, mode-s
-    dc.w move-s, next-s, new-s, old-s, on-s, sy-s, oscli1-s, print-s, proc-s, plot-s
-    dc.w repeat-s, return-s, restore-s, m, linend-s, read-s, run-s, renum-s, sy-s, save-s
-	dc.w stop-s, sound-s, sy-s, m, sy-s, sy-s, until-s, vdu-s, m
+/* statement starts with TIME - must be assignment to TIME */
+lettime:
+	move.b (a6)+, d5
+	cmp.b #32, d5           /* skip spaces */
+	beq.s lettime
+	cmp.b #61, d5           /* check for = */
+	bne mstk
+	bsr ix                  /* evaluate an integer expression */
+	rol.w #8, d0            /* D0 = [a3 a2 a0 a1] where a0 = ls byte of arg, a3 = ms byte etc. */
+	swap d0                 /* D0 = [a0 a1 a3 a2]
+	rol.w #8, d0            /* D0 = [a0 a1 a2 a3] (little endian for 6502) */
+	clr.w -(a7)
+	move.l d0, -(a7)        /* A7 points to argument (little end), extended with 0000 */
+	move.l a7, a1           /* source address for host memory write */
+    move.l #(5<<16)|3, d0   /* write 6502 memory, length 5 */
+	lea HOST_SIDE_BUF, a0   /* dest addr for host memory write */
+	trap #gen               /* write to host memory */
+	move.l #(HOST_SIDE_BUF<<16)|0x0201, d0  /* Host OSWORD call 2, argument block at HOST_BUF_PTR */
+	trap #gen               /* execute OSWORD call on host */
+	addq.l #6, a7           /* pop temporaries off stack */
+	bra l1                  /* next statement */
 
 /* REPEAT statement */
 repeat:
@@ -6537,18 +6660,20 @@ if1a:
 	bne l
 	bra goto
 if0:
-	moveq #13, d1
-	moveq #-111, d2
-	moveq #-104, d3
+	moveq #13, d1               /* line terminator */
+	moveq #-111, d2             /* ELSE */
+	moveq #-104, d3             /* IF */
 if2:
-	move.b (a6)+, d0
-	cmp.b d1, d0
-	beq.s if3
-	cmp.b d2, d0
-	beq.s if1a
-	cmp.b d3, d0
-	bne.s if2
-	bra linend
+	move.b (a6)+, d0            /* get next char */
+	cmp.b d1, d0                /* end of line? */
+	beq.s if3                   /* yes - finished */
+	cmp.b d2, d0                /* ELSE token? */
+	beq.s if1a                  /* yes - execute what comes after it */
+	cmp.b d3, d0                /* IF token? */
+	bne.s if2                   /* if not, look at next char */
+	bra linend                  /* else ignore the rest of the line
+                                 * since ELSE always binds to the last IF
+                                 */
 if3:
 	subq.l #1, a6
 	bra linend
@@ -7334,53 +7459,63 @@ nosuchproc:
 	dc.b  0
 .align 2
 findproc:
-	lea 4(a6), a0
-	move.l page, a1
-	moveq #-116, d0
+	lea 4(a6), a0           /* A6 points to address field of FF token for PROC/FN call site. A0 points to PROC/FN name to be found */
+	move.l page, a1         /* A1 points to line being examined */
+	move.w #0x8C, d0        /* DEF token */
 	bra.s fndprc2
+fndprc1a:
+	addq.l #4, a7
 fndprc1:
 	add.w d1, a1
 fndprc2:
-	move.w (a1), d1
-	beq.s nosuchproc
-	cmp.b 4(a1), d0
-	bne.s fndprc1
-	lea 5(a1), a2
+    move.w (a1), d1         /* D1 = length of current line */
+    beq.s nosuchproc        /* if zero, reached end of program */
+    lea 4(a1), a2           /* A2 points to first character of line (step over length and line number) */
+fndprc2a:
+    cmp.b (a2), d0          /* DEF token?*/
+    beq.s fndprc2b          /* yes - continue with this line */
+    cmp.b #32, (a2)+        /* space? */
+    beq.s fndprc2a          /* yes - look at next character */
+    bra.s fndprc1           /* no - skip to next line */
+fndprc2b:
+    addq.l #1, a2           /* skip past DEF token */
 fndprc3:
 	move.b (a2)+, d2
-	cmp.b #32, d2
+	cmp.b #32, d2           /* skip spaces between DEF and PROC/FN */
 	beq.s fndprc3
-	cmp.b 1(a7), d2
-	bne.s fndprc1
+	cmp.b 1(a7), d2         /* Check FN or PROC after DEF matches what we are looking for */
+	bne.s fndprc1           /* if not, skip to next line */
 	move.l a2, d2
 	addq.l #4, d2
-	and.w #0xfffe, d2
-	move.l d2, -(a7)
-	addq.l #4, d2
-	move.l d2, a2
-	move.l a0, a3
+	and.w #0xfffe, d2       /* D2 = (A2+3) rounded up to even address - points to address field of FF token */
+	move.l d2, -(a7)        /* save it */
+	addq.l #4, d2           /* step over address field */
+	move.l d2, a2           /* A2 now points to PROC/FN name */
+	move.l a0, a3           /* A3 points to name being searched for */
 	lea proctab-.-2(pc), a4
 	moveq #0, d2
-	move.b (a3), d2
-	tst.b 0(a4, d2.w)
-	beq badcall
+	move.b (a3), d2         /* first char of name */
+    move.w d2, d3
+    lsr.w #3, d3
+	btst.b d2, 0(a4, d3.w)  /* use lookup table to check if it a valid character in a PROC/FN name */
+	beq badcall             /* if not, error */
 fndprc4:
-	cmpm.b (a3)+, (a2)+
-	bne.s fndprc5
-	move.b (a3), d2
-	tst.b 0(a4, d2.w)
-	bne.s fndprc4
-	moveq #0, d3
-	move.b (a2), d3
-	tst.b 0(a4, d3.w)
-	beq.s foundproc
-fndprc5:
-	addq.l #4, a7
-	bra.s fndprc1
+	cmpm.b (a3)+, (a2)+     /* compare against name in line being examined */
+	bne.s fndprc1a          /* if not same, skip to next line */
+	move.b (a3), d2         /* D2 = character in name being searched for */
+    move.w d2, d3
+    lsr.w #3, d3
+	btst.b d2, 0(a4, d3.w)  /* is it a valid identifier character? */
+	bne.s fndprc4           /* if yes, check next character */
+	move.b (a2), d3         /* no - get corresponding character in DEF line */
+    move.w d3, d2
+    lsr.w #3, d2
+	btst.b d3, 0(a4, d2.w)  /* valid identifier character? */
+    bne.s fndprc1a          /* if yes, names don't match - call name is initial segment of DEF name */
 foundproc:
-	move.l (a7)+, a4
-	move.l a4, (a6)
-	st lnflg
+	move.l (a7)+, a4        /* recover pointer to address field in call site FF token */
+	move.l a4, (a6)         /* update cached address field at call site */
+    st lnflg                /* set flag indicating program addresses have been cached */
 	move.l a4, d0
 	tst.l (a4)
 	bne proc3
@@ -7450,23 +7585,14 @@ noparms:
 	move.l (a6), d0
 	bra proc3
 proctab:
-	dc.l 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0     /* 00 - 2F */
-	dc.b 1, 1, 1, 1, 1, 1, 1, 1, 1, 1           /* 30 - 39 */
-	dc.b 0, 0, 0, 0, 0, 0, 0                    /* 3A - 40 */
-	dc.b 1, 1, 1, 1, 1, 1, 1, 1, 1, 1           /* 41 - 4A */
-	dc.b 1, 1, 1, 1, 1, 1, 1, 1, 1, 1           /* 4B - 54 */
-	dc.b 1, 1, 1, 1, 1, 1                       /* 55 - 5A */
-    dc.b 0, 0, 0, 0                             /* 5B - 5E */
-	dc.b 1                                      /* 5F */
-	dc.b 0                                      /* 60 */
-	dc.b 1, 1, 1, 1, 1, 1, 1, 1, 1, 1           /* 61 - 6A */
-	dc.b 1, 1, 1, 1, 1, 1, 1, 1, 1, 1           /* 6B - 74 */
-	dc.b 1, 1, 1, 1, 1, 1                       /* 75 - 7A */
-    dc.b 0, 0, 0, 0, 0                          /* 7B - 7F */
-	dc.l 0, 0, 0, 0, 0, 0, 0, 0                 /* 80 - 9F */
-	dc.l 0, 0, 0, 0, 0, 0, 0, 0                 /* A0 - BF */
-	dc.l 0, 0, 0, 0, 0, 0, 0, 0                 /* C0 - DF */
-	dc.l 0, 0, 0, 0, 0, 0, 0, 0                 /* E0 - FF */
+/* Table with 1's in bit positions corresponding to characters permitted
+ * in PROC/FN names. 0-9, A-Z, a-z, _
+ */
+    dc.b 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x03     /* 00 - 3F */
+    dc.b 0xFE, 0xFF, 0xFF, 0x87, 0xFE, 0xFF, 0xFF, 0x07     /* 40 - 7F */
+    dc.b 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00     /* 80 - BF */
+    dc.b 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00     /* C0 - FF */
+
 noproc:
 	trap #err
 	dc.b 13
