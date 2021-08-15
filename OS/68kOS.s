@@ -19,7 +19,6 @@
  * along with 68000 Software Suite.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-
 /* 6821 PIA register addresses
  *
  * Port A is input from the Electron
@@ -119,13 +118,16 @@ exctab1:
 	dc.w berr-exctab1, aerr-exctab1, illegal-exctab1
 	dc.w divby0-exctab1, chkerr-exctab1, overflow-exctab1
 	dc.w priv-exctab1, trace-exctab1, aopc-exctab1, fopc-exctab1
+
+    .extern monitor_entry
+
 .equ	dof, int3-exctab2
 exctab2:
-	dc.w dof, int-exctab2, dof, dof, dof, dof, dof, dof     /* IRQ autovectors */
-	dc.w error-exctab2, oswrch-exctab2, osrdch-exctab2      /* TRAP vectors 0, 1, 2 */
-	dc.w osgen-exctab2, osfile-exctab2, prthex-exctab2      /* TRAP vectors 3, 4, 5 */
-	dc.w osasci-exctab2, osnewl-exctab2, msg1-exctab2       /* TRAP vectors 6, 7, 8 */
-	dc.w dof, dof, dof, dof, dof, dof, dof                  /* TRAP vectors 9-15 */
+	dc.w dof, int-exctab2, dof, dof, dof, dof, dof, dof         /* IRQ autovectors */
+	dc.w error-exctab2, oswrch-exctab2, osrdch-exctab2          /* TRAP vectors 0, 1, 2 */
+	dc.w osgen-exctab2, osfile-exctab2, prthex-exctab2          /* TRAP vectors 3, 4, 5 */
+	dc.w osasci-exctab2, osnewl-exctab2, msg1-exctab2           /* TRAP vectors 6, 7, 8 */
+	dc.w dof, dof, dof, dof, dof, dof, monitor_entry-exctab2    /* TRAP vectors 9-15 */
 
 /* PIA interrupt service routine */
 int:

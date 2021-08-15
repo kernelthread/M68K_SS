@@ -25,6 +25,7 @@ else
 PROGNAME:=$(PROG)
 endif
 
+SOURCES:=68kOS.s 68kMCM.s
 COMMON_DIR:=../Common
 LINK_SCRIPT:=68kOS.sct
 include $(COMMON_DIR)/common.mak
