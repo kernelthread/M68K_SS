@@ -4297,6 +4297,7 @@ start_basic:
 	move.l user, a7                 /* Set user stack pointer */
 	clr.b lopt                      /* Default LISTO mode */
 	move.l #0x90a, formvar          /* Default value of @% */
+    clr.w erl                       /* Clear error line number */
 new2:
 	move.l page, a0
 	clr.w (a0)+                     /* Clear program */
@@ -4343,16 +4344,16 @@ notnum:
 /* OS transfers control here when an error occurs */
 error:
 	and.w #0xdfff, sr               /* Back into user mode */
-	tst.w cline
+	move.w cline, d0                /* D0.W = current line number */
 	beq.s error0                    /* skip if current line number = 0 (console command line) */
 	trap #msg
 .ascii " at line "
 	dc.b  0
 .align 2
-	move.w cline, d0
-	move.w d0, erl                  /* save line at which error occurred in ERRLN */
 	bsr outlnm                      /* display line number at which error occurred */
+	move.w cline, d0                /* D0.W = current line number */
 error0:
+	move.w d0, erl                  /* save line at which error occurred in ERRLN */
 	trap #newl
 	bra main
 mstk:
