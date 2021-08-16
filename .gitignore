@@ -2,6 +2,7 @@
 
 **/*.elf
 **/*.o
+**/*.d
 Assembler/68kAsm.bin
 Assembler/68kAsm.lst
 Basic/68kBasic.bin
@@ -10,5 +11,6 @@ BootROM/boot68k.bin
 BootROM/boot68k.lst
 OS/68kOS.bin
 OS/68kOS.lst
+OS/68kMCM.lst
 Word/68kWp.bin
 Word/68kWp.lst

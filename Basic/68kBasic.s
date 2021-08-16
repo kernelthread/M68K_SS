@@ -2099,12 +2099,43 @@ strnf:
 	moveq #-1, d6           /* String variable not found, D6 = string type indicator */
 	bra.s intnf1            /* Check for array */
 
-/* Search a list of variables pointed to by A0
+/* Search a linked list of variables for a specific variable by name
+ *
+ * On entry:
+ *      A0 points to one of the 52 linked lists of variables
+ *      A6 points to second character of name being searched for
+ *
+ * On return:
+ *  If variable found:
+ *      Carry flag clear
+ *      A6 points to character after name searched for, including %, $ and ( if present
+ *      For integer variable
+ *          D0.L = value, A0 points to value
+ *          A1 points to character after name searched for, including %, $ and ( if present
+ *      For float variable
+ *          D0.L/D1.W = value, A0 points to value
+ *          A1 points to character after name searched for, including %, $ and ( if present
+ *      For string variable
+ *          D0.W=string length, A0 points to string, A1 points to string pointer
+ *
+ * If variable not found:
+ *      Carry flag set
+ *      A0 points to last item in linked list, (A0)=0 (link pointer of last item)
+ *      A1 points to character after name searched for, including %, $ and ( if present
+ *      A6 unmodified
+ *
+ * In either case:
+ *      Overflow flag set iff variable searched for is an array
+ *      D6.L = 0 if variable searched for is an integer variable or array
+ *      D6.L = 1 if variable searched for is a floating point variable or array
+ *      D6.L = -1 if variable searched for is a string variable or array
+ *
+ * Registers modified: D0-D3,D6, A0-A2,A6
  */
 findvar:
-	moveq #0x25, d1
-	moveq #0x24, d2
-	moveq #0x28, d3
+	moveq #0x25, d1         /* '%' */
+	moveq #0x24, d2         /* '$' */
+	moveq #0x28, d3         /* '(' */
 var2:
 	move.l a0, a2
 	move.l (a0), d0         /* D0 points to next entry to check */
@@ -6688,163 +6719,185 @@ baddim:
 /* DIM statement */
 dim:
 	move.b (a6)+, d0
-	cmp.b #32, d0
+	cmp.b #32, d0               /* skip spaces */
 	beq.s dim
 	sub.b #65, d0
-	bcs.s baddim
-	lea varca, a0
+	bcs.s baddim                /* following character must be A-Z or a-z */
+	lea varca, a0               /* A0 points to array of linked list heads for A-Z */
 	cmp.b #25, d0
-	bls.s dim1
+	bls.s dim1                  /* capital letter, go to check for raw memory allocation */
 	sub.b #32, d0
 	bcs.s baddim
 	cmp.b #25, d0
 	bhi.s baddim
-	lea varsa, a0
-	bra.s dim2
+	lea varsa, a0               /* A0 points to array of linked list heads for a-z */
+	bra.s dim2                  /* go to collect array dimensions */
 dim1:
-	cmp.b #0x25, (a6)
-	bne.s dim2
-	cmp.b #0x28, 1(a6)
-	beq.s dim2
-	addq.l #1, a6
+	cmp.b #0x25, (a6)           /* integer array? */
+	bne.s dim2                  /* no - go to collect array dimensions */
+	cmp.b #0x28, 1(a6)          /* standard BASIC array? */
+	beq.s dim2                  /* yes - go to collect array dimensions */
+	addq.l #1, a6               /* else must be raw memory allocation */
 	ext.w d0
 	asl.w #2, d0
 	lea resint, a0
-	add.w d0, a0
+	add.w d0, a0                /* A0 points to resident integer variable to receive base address */
 	bra dimvar3
+
+/* Collect array dimensions */
 dim2:
 	ext.w d0
 	asl.w #2, d0
-	add.w d0, a0
-	bsr findvar
-	bvc dimvar
-	bcc baddim
-	movem.l a0/a1/a6/d6, -(a7)
-	move.l a1, a6
-	moveq #1, d7
-	moveq #0, d5
+	add.w d0, a0                /* A0 points to linked list to which this array will be added */
+	bsr findvar                 /* Check if array already exists */
+	bvc dimvar                  /* is it an array? branch if not (raw memory allocation) */
+	bcc baddim                  /* it is an array - if it already exists, error */
+	movem.l a0/a1/a6/d6, -(a7)  /* save ptr to last linked list entry (A0), text ptr after name (A1), original text ptr (A6), data type (D6) */
+	move.l a1, a6               /* step past array name and ( */
+	moveq #1, d7                /* D7 accumulates total array size */
+	moveq #0, d5                /* D5 = number of dimensions */
 dim3:
 	move.l d5, -(a7)
-	bsr ix
+	bsr ix                      /* get integer expression for next dimension size */
 	move.l (a7)+, d5
-	tst.l d0
-	beq baddim
-	cmp.l #65536, d0
+	cmp.l #65535, d0            /* if negative or >=65535, error */
 	bcc baddim
-	mulu d0, d7
-	cmp.l #65536, d7
+    addq.l #1, d0               /* add 1 since value is maximum index, size is 1 greater */
+	mulu d0, d7                 /* multiply total size by size of this dimension */
+	cmp.l #65536, d7            /* if >=65536, error */
 	bcc baddim
-	addq.w #1, d5
-	move.w d0, -(a7)
-	move.b (a6)+, d0
-	cmp.b #44, d0
-	beq.s dim3
-	cmp.b #41, d0
-	bne msngbrkt
-	add.w d5, d5
-	lea 0(a7, d5.w), a4
-	movem.l (a4)+, d6/a0/a1/a2
-	moveq #4, d4
-	tst.b d6
-	beq.s dim4
-	bpl.s dim5
-	move.w deflen, d4
-	addq.w #5, d4
+	addq.w #1, d5               /* 1 more dimension */
+	move.w d0, -(a7)            /* save size of this dimension */
+	move.b (a6)+, d0            /* get next text character */
+	cmp.b #44, d0               /* comma? */
+	beq.s dim3                  /* if so, deal with next dimension */
+	cmp.b #41, d0               /* if not, check for closing ) */
+	bne msngbrkt                /* error if not there */
+	add.w d5, d5                /* 2 x number of dimensions */
+	lea 0(a7, d5.w), a4         /* A4 points to stack above saved dimension sizes */
+	movem.l (a4)+, d6/a0/a1/a2  /* get saved values of registers, except saved A6 (original text pointer) goes into A2 */
+	moveq #4, d4                /* D4 = element size */
+	tst.b d6                    /* check data type */
+	beq.s dim4                  /* skip if integer */
+	bpl.s dim5                  /* branch if float */
+	move.w deflen, d4           /* string, set D4 = default string length for array alloc */
+	addq.w #5, d4               /* add 5 bytes for string terminator, string pointer */
 dim5:
-	addq.w #2, d4
+	addq.w #2, d4               /* add 2 bytes - for float, exp+sign, for string, length + alloc length */
 dim4:
-	move.l a1, d0
-	sub.l a2, d0
-	addq.w #8, d0
-	add.l d5, d0
-	move.w d4, d1
-	mulu d7, d1
-	add.l d1, d0
-	and.w #0xfffe, d0
-	move.l vartop, a3
-	add.l a3, d0
-	cmp.l a5, d0
-	bhi noroom
-	move.l d0, vartop
-	move.l a3, (a0)
-	clr.l (a3)+
+	move.l a1, d0               /* D0 = pointer after name, including %, $ and/or ( */
+	sub.l a2, d0                /* D0 = name length, excluding 1st character */
+	addq.w #8, d0               /* add 4 bytes for link ptr, 1 byte for name terminator, 2 bytes for #dimensions, +1 for round to even */
+	add.l d5, d0                /* add 2 bytes for each dimension to hold size of that dimension */
+	move.w d4, d1               /* D1 = size per element */
+	mulu d7, d1                 /* multiply by number of elements */
+	add.l d1, d0                /* add array header size */
+	and.w #0xfffe, d0           /* round to even (+1 already added to header size) */
+	move.l vartop, a3           /* get current vartop */
+	add.l a3, d0                /* add allocation size */
+	cmp.l a5, d0                /* check if we have hit BASIC stack */
+	bhi noroom                  /* if so, out of memory */
+	move.l d0, vartop           /* OK, so update vartop */
+	move.l a3, (a0)             /* add to linked list */
+	clr.l (a3)+                 /* linked list pointer = 0 for this new entry */
 dim6:
-	move.b (a2)+, (a3)+
+	move.b (a2)+, (a3)+         /* copy name of array */
 	cmp.l a1, a2
 	bcs.s dim6
-	clr.b (a3)+
+	clr.b (a3)+                 /* zero terminator */
 	move.l a3, d0
 	addq.l #1, d0
 	and.w #0xfffe, d0
-	move.l d0, a3
+	move.l d0, a3               /* round A3 up to even address */
 	addq.w #2, d5
-	move.w d5, (a3)+
+	move.w d5, (a3)+            /* save 2 + 2*#dimensions = size of dimension size section, including this entry */
 	subq.w #4, d5
 dim7:
-	move.w 0(a7, d5.w), (a3)+
+	move.w 0(a7, d5.w), (a3)+   /* copy dimension sizes from stack to array entry */
 	subq.w #2, d5
 	bpl.s dim7
-	tst.b d6
-	bmi.s dimstr
-	addq.b #2, d6
+	tst.b d6                    /* check data type */
+	bmi.s dimstr                /* branch out if string */
+	addq.b #2, d6               /* else int=0 or float=1, add 2 gives size of element in 16 bit words */
 	ext.w d6
-	mulu d7, d6
+	mulu d7, d6                 /* D6 = total array size in 16 bit words */
 	moveq #0, d0
+    lsr.l #1, d6                /* D6 = total array size in 32 bit words, C=1 if one extra 16 bit word */
+    bcc.s 1f
+    move.w d0, (a3)+            /* do odd word */
+1:
+    lsr.l #1, d6                /* D6 = total array size in 64 bit words, C=1 if one extra 32 bit word */
+    bcc.s 1f
+    move.l d0, (a3)+            /* do odd 32 bit word */
+1:
+    lsr.l #1, d6                /* D6 = total array size in 128 bit blocks, C=1 if one extra 64 bit word */
+    bcc.s 1f
+    move.l d0, (a3)+            /* do odd 64 bit word */
+    move.l d0, (a3)+
+1:
+    tst.l d6                    /* finish if no 128 bit groups to do */
+    beq.s dimend
 dim8:
-	move.w d0, (a3)+
+	move.l d0, (a3)+            /* clear array to all zeros */
+    move.l d0, (a3)+
+    move.l d0, (a3)+
+    move.l d0, (a3)+
 	subq.l #1, d6
 	bne.s dim8
 	bra.s dimend
-dimstr:
-	moveq #6, d6
-	mulu d7, d6
-	lea 0(a3, d6.l), a2
+dimstr:                         /* string array */
+	moveq #6, d6                /* size of header for each string (ptr + alloc len + len) */
+	mulu d7, d6                 /* total size of header entries */
+	lea 0(a3, d6.l), a2         /* A2 = pointer to memory area where actual strings will be stored */
 dim9:
-	move.l a2, (a3)+
-	move.b deflen+1, (a3)+
-	clr.b (a3)+
-	move.b #13, (a2)
-	add.w deflen, a2
-	addq.w #1, a2
-	subq.w #1, d7
-	bne.s dim9
+	move.l a2, (a3)+            /* store pointer to string */
+	move.b deflen+1, (a3)+      /* store allocated length */
+	clr.b (a3)+                 /* set actual length to zero */
+	move.b #13, (a2)            /* store terminator */
+	add.w deflen, a2            /* advance A2 by deflen */
+	addq.w #1, a2               /* and by 1 more for string terminator */
+	subq.w #1, d7               /* 1 less entry to do */
+	bne.s dim9                  /* do next entry until complete */
 dimend:
-	move.l a4, a7
+	move.l a4, a7               /* pop stored array dimensions off stack */
 dimnd2:
 	move.b (a6)+, d0
-	cmp.b #32, d0
+	cmp.b #32, d0               /* skip spaces */
 	beq.s dimnd2
-	cmp.b #44, d0
-	beq dim
-	subq.l #1, a6
-	bra l1
+	cmp.b #44, d0               /* check for comma */
+	beq dim                     /* if so, another array is being declared, so go back to beginning */
+	subq.l #1, a6               /* else done */
+	bra l1                      /* get and execute next statement */
+
+/* Come here for raw memory allocation */
 dimvar:
-	bcc.s dimvar2
-	tst.b d6
-	bmi baddim
-	bsr create
+	bcc.s dimvar2               /* skip if variable already exists */
+	tst.b d6                    /* check variable type */
+	bmi baddim                  /* if string, error */
+	bsr create                  /* create variable */
 dimvar2:
 	tst.b d6
-	bmi baddim
-	beq.s dimvar3
-	move.l vartop, d0
-	bsr intfp
-	move.l d0, 2(a0)
+	bmi baddim                  /* if string variable, error */
+	beq.s dimvar3               /* branch out if integer */
+	move.l vartop, d0           /* get vartop */
+	bsr intfp                   /* convert to float */
+	move.l d0, 2(a0)            /* store in variable */
 	move.w d1, (a0)
-	bra.s dimvar4
+	bra.s dimvar4               /* branch to step vartop on past new allocation */
+
 dimvar3:
-	move.l vartop, (a0)
+	move.l vartop, (a0)         /* store vartop in integer variable */
 dimvar4:
-	bsr ix
+	bsr ix                      /* get integer expression for requested size */
 	tst.l d0
-	bmi baddim
-	add.l vartop, d0
+	bmi baddim                  /* if negative, error */
+	add.l vartop, d0            /* vartop + requested size */
 	addq.l #1, d0
-	and.w #0xfffe, d0
-	cmp.l a5, d0
-	bhi noroom
-	move.l d0, vartop
-	bra.s dimnd2
+	and.w #0xfffe, d0           /* round up to even address */
+	cmp.l a5, d0                /* check if we have collided with BASIC stack */
+	bhi noroom                  /* if so, out of memory */
+	move.l d0, vartop           /* otherwise, update vartop */
+	bra.s dimnd2                /* finished with this declaration */
 
 
 
@@ -7308,12 +7361,14 @@ nocall:
 	dc.b  0
 	dc.b  0
 .align 2
+
+/* Set the default allocation length for strings */
 stdfln:
-	bsr ix
-	cmp.l #255, d0
+	bsr ix                      /* get integer expression for length */
+	cmp.l #255, d0              /* error if >256 */
 	bhi il
-	or.w #1, d0
-	move.w d0, deflen
+	or.w #1, d0                 /* round up so string + terminator has even length */
+	move.w d0, deflen           /* set deflen */
 	bra l1
 
 /* User-defined function invocation */
